@@ -1,0 +1,194 @@
+<?xml version="1.0" ?>
+<robot name="scuttle" xmlns:xacro="http://www.ros.org/wiki/xacro" >
+
+  <xacro:property name="body_color" value="0.7 0.7 0.7 1.0" />
+  <xacro:property name="wheel_color" value="0 0 0.7 1.0" />
+  <xacro:property name="lidar_color" value="0.25 0.25 0.25 1.0" />
+
+  <xacro:arg name="differential_drive_command_topic" default="cmd_vel"/>
+  <xacro:arg name="differential_drive_odometry_topic" default="odom"/>
+  <xacro:arg name="differential_drive_odometry_frame" default="odom"/>
+
+  ----------------------------------------------------------------
+  <!--
+    IMPORTANT: Gazebo-Sim / ros_gz system plugins
+    - gz_ros2_control-system: provides ros2_control <-> gz-sim bridge (controller manager)
+      The <parameters> tag should point to your controller YAML (controller config).
+    - gz-sim-diff-drive-system: built-in diff-drive system in gz-sim.
+    - gz-sim-joint-state-publisher-system: (optional) publishes joint_states from the simulator.
+  -->
+  ----------------------------------------------------------------
+
+  <!-- ros2_control bridge system plugin (gz_ros2_control) -->
+  <gazebo>
+    <!--
+      Make sure you have the gz_ros2_control binary installed for Jazzy (apt: ros-jazzy-gz-ros2-control)
+      The parameters entry should be the full path to your controller YAML (controller manager config)
+      Example value below assumes your YAML is at:
+        <your_package>/config/scuttle_controllers.yaml
+    -->
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find scuttle_description)/config/scuttle_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+  <!-- Surface properties for base_link -->
+  <gazebo reference="base_link">
+    <material>${body_color}</material>
+    <mu1>0.2</mu1>
+    <mu2>0.2</mu2>
+    <selfCollide>true</selfCollide>
+    <gravity>true</gravity>
+  </gazebo>
+
+  <!-- Wheel appearance + friction -->
+  <gazebo reference="l_wheel">
+    <material>${wheel_color}</material>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <gazebo reference="r_wheel">
+    <material>${wheel_color}</material>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <!-- Other link visuals -->
+  
+
+  <gazebo reference="r_caster_swivel">
+    <material>${body_color}</material>
+    <mu1>0.2</mu1>
+    <mu2>0.2</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <gazebo reference="l_caster_swivel">
+    <material>${body_color}</material>
+    <mu1>0.2</mu1>
+    <mu2>0.2</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <gazebo reference="l_caster_wheel">
+    <material>${wheel_color}</material>
+    <mu1>0.4</mu1>
+    <mu2>0.4</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  <gazebo reference="r_caster_wheel">
+    <material>${wheel_color}</material>
+    <mu1>0.4</mu1>
+    <mu2>0.4</mu2>
+    <selfCollide>true</selfCollide>
+  </gazebo>
+
+  ----------------------------------------------------------------
+  <!-- Differential Drive system plugin for Gazebo-Sim -->
+  <!--
+    Migration notes:
+     - leftJoint/rightJoint -> left_joint/right_joint
+     - wheelDiameter -> wheel_radius (wheel_radius = wheelDiameter / 2)
+     - wheelSeparation -> wheel_separation
+     - This plugin is the gz-sim system plugin that handles cmd_vel -> joint actuation + odom.
+     - Name should be: name="gz::sim::systems::DiffDrive"
+  -->
+  ----------------------------------------------------------------
+  <gazebo>
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+
+      <!-- joints (names must match your URDF joint names) -->
+      <left_joint>l_wheel_joint</left_joint>
+      <right_joint>r_wheel_joint</right_joint>
+
+      <!-- kinematics (you had wheelDiameter=0.0833 -> radius ~= 0.04165) -->
+      <wheel_separation>0.4247</wheel_separation> <!-- taken from URDF: 0.21235 left/right -->
+      <wheel_radius>0.04165</wheel_radius>
+
+      <!-- plugin behaviour -->
+      <wheel_acceleration>2.7</wheel_acceleration>
+      <wheel_torque>0.392</wheel_torque>
+
+      <!-- how the plugin receives cmd_vel / publishes odom -->
+      <!-- For Gazebo-Sim it's recommended to use ros_gz_bridge to map gz topics to ROS2.
+           Older <ros> tags are usually removed in the migration, but you can keep
+           the topic names here for clarity. -->
+      <command_topic>$(arg differential_drive_command_topic)</command_topic>
+      <odom_topic>$(arg differential_drive_odometry_topic)</odom_topic>
+      <odom_frame>$(arg differential_drive_odometry_frame)</odom_frame>
+
+      <!-- publish odometry transform? -->
+      <publish_odom>true</publish_odom>
+
+      <!-- legacyMode => keep consistent with your original (false here) -->
+      <legacy_mode>false</legacy_mode>
+    </plugin>
+  </gazebo>
+
+  ----------------------------------------------------------------
+  <!-- Optional: JointState publisher from the simulator side (GZ system) -->
+  <!-- This publishes joint_states on a gz topic which can be bridged to ROS2.
+       If you prefer ros2_control + joint_state_broadcaster to publish /joint_states,
+       you can omit this. -->
+  ----------------------------------------------------------------
+  <gazebo>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/joint_states</topic>
+      <!-- optionally restrict to wheel joints -->
+      <joint_name>l_wheel_joint</joint_name>
+      <joint_name>r_wheel_joint</joint_name>
+    </plugin>
+  </gazebo>
+
+  ----------------------------------------------------------------
+  <!-- LIDAR sensor (ray) — keep sensor description here; bridge with ros_gz_bridge -->
+  <!--
+    Recommendation:
+     - Keep the <sensor> XML as-is.
+     - Do NOT rely on the old Gazebo Classic ROS laser plugin (libgazebo_ros_laser.so).
+     - Instead run a ros_gz_bridge mapping so that gz publishes /scan (gz msgs) and ros_gz_bridge
+       converts it to sensor_msgs/msg/LaserScan on the ROS2 side.
+    Example ros_gz_bridge YAML entry:
+      - { ros_topic_name: "/scan", gz_topic_name: "/model/<model>/link/<link>/sensor/scan",
+          ros_type_name: "sensor_msgs/msg/LaserScan", gz_type_name: "gz.msgs.LaserScan", direction: GZ_TO_ROS }
+  -->
+  ----------------------------------------------------------------
+  
+
+  <!-- RPLidar A1 Sensor Configuration (matches real hardware specs) -->
+  <gazebo reference="lidar_1">
+    <sensor name="rplidar_a1" type="gpu_lidar">
+      <topic>scan</topic>
+      <update_rate>5.5</update_rate>  <!-- RPLidar A1 typical scan rate -->
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>400</samples>  <!-- RPLidar A1: ~400 samples per scan -->
+            <resolution>1</resolution>
+            <min_angle>0</min_angle>
+            <max_angle>6.28318530718</max_angle>  <!-- 360 degrees -->
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.15</min>  <!-- RPLidar A1 min range: 0.15m -->
+          <max>12.0</max>  <!-- RPLidar A1 max range: 12m -->
+          <resolution>0.01</resolution>
+        </range>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>  <!-- Realistic noise -->
+        </noise>
+      </ray>
+      <always_on>true</always_on>
+      <visualize>true</visualize>  <!-- Shows lidar rays in Gazebo -->
+    </sensor>
+  </gazebo>
+
+</robot>
